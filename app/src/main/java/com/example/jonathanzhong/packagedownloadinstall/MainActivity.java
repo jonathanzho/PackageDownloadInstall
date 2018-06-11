@@ -1,10 +1,14 @@
 package com.example.jonathanzhong.packagedownloadinstall;
 
 import android.Manifest;
+import android.app.DownloadManager;
 import android.app.ProgressDialog;
+import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.pm.PackageManager;
+import android.database.Cursor;
 import android.net.Uri;
 import android.os.AsyncTask;
 import android.os.Build;
@@ -37,8 +41,12 @@ public class MainActivity extends AppCompatActivity {
 
   private static final String APK_DOWNLOAD_URL =
       "https://github.com/jonathanzho/resFiles/raw/master/apk/PayJoyPackageMonitor.apk";
+  private static final String APK_FILE_NAME = "PayJoyPackageMonitor.apk";
 
   ProgressDialog pd;
+
+  private long enqueue;
+  private DownloadManager dm;
 
   @Override
   protected void onCreate(Bundle savedInstanceState) {
@@ -61,7 +69,73 @@ public class MainActivity extends AppCompatActivity {
     // Customization starts from here.
 
     // Get runtime storage permission for API 23 and up:
-    isStoragePermissionGranted();
+    //isStoragePermissionGranted();
+
+    BroadcastReceiver receiver = new BroadcastReceiver() {
+      @Override
+      public void onReceive(Context context, Intent intent) {
+        String action = intent.getAction();
+
+        if (DownloadManager.ACTION_DOWNLOAD_COMPLETE.equals(action)) {
+          long downloadId = intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, 0);
+          DownloadManager.Query query = new DownloadManager.Query();
+          query.setFilterById(enqueue);
+          Cursor c = dm.query(query);
+
+          if (c.moveToFirst()) {
+            int columnIndex = c.getColumnIndex(DownloadManager.COLUMN_STATUS);
+
+            if (DownloadManager.STATUS_SUCCESSFUL == c.getInt(columnIndex)) {
+              Log.v(TAG, "download SUCCESSFUL");
+
+              Log.v(TAG, "displaying APK...");
+
+              Intent displayIntent = new Intent();
+              displayIntent.setAction(DownloadManager.ACTION_VIEW_DOWNLOADS);
+              startActivity(displayIntent);
+
+              try {
+                Thread.sleep(5000);
+              } catch (InterruptedException e) {
+                e.printStackTrace();
+              }
+
+              // Install APK
+              String destination = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS) + "/";
+              String fileName = APK_FILE_NAME;
+              destination += fileName;
+              final Uri uri = Uri.parse("file://" + destination);
+
+              Intent installIntent = new Intent(Intent.ACTION_VIEW);
+              installIntent.setFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP);
+              installIntent.setDataAndType(uri, dm.getMimeTypeForDownloadedFile(enqueue));
+
+              Log.v(TAG, "installing APK...");
+
+              startActivity(installIntent);
+
+              unregisterReceiver(this);
+              finish();
+            } else {
+              Log.e(TAG, "download UNSUCCESSFUL");
+            }
+          }
+        }
+      }
+    };
+
+    registerReceiver(receiver, new IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE));
+
+    try {
+      Thread.sleep(5000);
+    } catch (InterruptedException e) {
+      e.printStackTrace();
+    }
+
+    dm = (DownloadManager) getSystemService(DOWNLOAD_SERVICE);
+    DownloadManager.Request request = new DownloadManager.Request(
+        Uri.parse(APK_DOWNLOAD_URL));
+    enqueue = dm.enqueue(request);
 
     Log.d(TAG, "onCreate: end");
   }
