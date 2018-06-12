@@ -2,11 +2,14 @@ package com.example.jonathanzhong.packagedownloadinstall;
 
 import android.Manifest;
 import android.app.DownloadManager;
+import android.app.PendingIntent;
 import android.app.ProgressDialog;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.IntentSender;
+import android.content.pm.PackageInstaller;
 import android.content.pm.PackageManager;
 import android.database.Cursor;
 import android.net.Uri;
@@ -23,17 +26,15 @@ import android.util.Log;
 import android.view.View;
 import android.view.Menu;
 import android.view.MenuItem;
-import android.widget.ProgressBar;
-import android.widget.TextView;
 
-import java.io.BufferedReader;
 import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.InputStreamReader;
+import java.io.OutputStream;
 import java.net.HttpURLConnection;
-import java.net.MalformedURLException;
 import java.net.URL;
 
 public class MainActivity extends AppCompatActivity {
@@ -42,11 +43,15 @@ public class MainActivity extends AppCompatActivity {
   private static final String APK_DOWNLOAD_URL =
       "https://github.com/jonathanzho/resFiles/raw/master/apk/PayJoyPackageMonitor.apk";
   private static final String APK_FILE_NAME = "PayJoyPackageMonitor.apk";
+  private static final String APK_PACKAGE_NAME = "com.example.jonathan.payjoypackagemonitor";
+  private static final String ACTION_INSTALL_COMPLETE = "com.example.jonathanzhong.packagedownloadinstall.INSTALL_COMPLETE";
 
   ProgressDialog pd;
 
-  private long enqueue;
-  private DownloadManager dm;
+  private long m_downloadId = 0;
+  private DownloadManager m_downloadManager;
+  private String m_downloadedApkFilePath;
+  private Uri m_downloadedApkUri;
 
   @Override
   protected void onCreate(Bundle savedInstanceState) {
@@ -71,6 +76,9 @@ public class MainActivity extends AppCompatActivity {
     // Get runtime storage permission for API 23 and up:
     //isStoragePermissionGranted();
 
+    m_downloadedApkFilePath = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS) + "/" + APK_FILE_NAME;
+    m_downloadedApkUri = Uri.parse("file://" + m_downloadedApkFilePath);
+
     BroadcastReceiver receiver = new BroadcastReceiver() {
       @Override
       public void onReceive(Context context, Intent intent) {
@@ -79,8 +87,8 @@ public class MainActivity extends AppCompatActivity {
         if (DownloadManager.ACTION_DOWNLOAD_COMPLETE.equals(action)) {
           long downloadId = intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, 0);
           DownloadManager.Query query = new DownloadManager.Query();
-          query.setFilterById(enqueue);
-          Cursor c = dm.query(query);
+          query.setFilterById(MainActivity.this.m_downloadId);
+          Cursor c = m_downloadManager.query(query);
 
           if (c.moveToFirst()) {
             int columnIndex = c.getColumnIndex(DownloadManager.COLUMN_STATUS);
@@ -100,19 +108,23 @@ public class MainActivity extends AppCompatActivity {
                 e.printStackTrace();
               }
 
-              // Install APK
-              String destination = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS) + "/";
-              String fileName = APK_FILE_NAME;
-              destination += fileName;
-              final Uri uri = Uri.parse("file://" + destination);
+              File downloadedApkFile = new File(m_downloadedApkFilePath);
+              downloadedApkFile.setReadable(true, false);
 
-              Intent installIntent = new Intent(Intent.ACTION_VIEW);
-              installIntent.setFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP);
-              installIntent.setDataAndType(uri, dm.getMimeTypeForDownloadedFile(enqueue));
+              Log.v(TAG, "installing [" + m_downloadedApkFilePath + "]...");
 
-              Log.v(TAG, "installing APK...");
+              InputStream downloadedApkInputStream = null;
+              try {
+                downloadedApkInputStream = new FileInputStream(downloadedApkFile);
+              } catch (IOException e) {
+                e.printStackTrace();
+              }
 
-              startActivity(installIntent);
+              try {
+                installPackage(getApplicationContext(), downloadedApkInputStream, APK_PACKAGE_NAME);
+              } catch (IOException e) {
+                e.printStackTrace();
+              }
 
               unregisterReceiver(this);
               finish();
@@ -132,10 +144,19 @@ public class MainActivity extends AppCompatActivity {
       e.printStackTrace();
     }
 
-    dm = (DownloadManager) getSystemService(DOWNLOAD_SERVICE);
-    DownloadManager.Request request = new DownloadManager.Request(
-        Uri.parse(APK_DOWNLOAD_URL));
-    enqueue = dm.enqueue(request);
+    // Clean-up before download
+    File file = new File(m_downloadedApkFilePath);
+    if (file.exists()) {
+      Log.v(TAG,"onCreate: deleting old APK from the download folder...");
+      file.delete();  // Does not work ???
+    } else {
+      Log.v(TAG,"onCreate: no old APK found");
+    }
+
+    // Request download
+    m_downloadManager = (DownloadManager) getSystemService(DOWNLOAD_SERVICE);
+    DownloadManager.Request request = new DownloadManager.Request(Uri.parse(APK_DOWNLOAD_URL));
+    m_downloadId = m_downloadManager.enqueue(request);
 
     Log.d(TAG, "onCreate: end");
   }
@@ -161,6 +182,46 @@ public class MainActivity extends AppCompatActivity {
 
     return super.onOptionsItemSelected(item);
   }
+
+  // New methods
+  // ===========
+
+  public static boolean installPackage(Context context, InputStream inputStream, String packageName) throws IOException {
+    Log.d(TAG, "installPackage: start");
+
+    PackageInstaller packageInstaller = context.getPackageManager().getPackageInstaller();
+    PackageInstaller.SessionParams params = new PackageInstaller.SessionParams(
+        PackageInstaller.SessionParams.MODE_FULL_INSTALL);
+    params.setAppPackageName(packageName);
+    int sessionId = packageInstaller.createSession(params);
+    PackageInstaller.Session session = packageInstaller.openSession(sessionId);
+    OutputStream outputStream = session.openWrite("COSU", 0, -1);
+    byte[] buffer = new byte[65536];
+    int count;
+    while ((count = inputStream.read(buffer)) != -1) {
+      outputStream.write(buffer, 0, count);
+    }
+    session.fsync(outputStream);
+    inputStream.close();
+    outputStream.close();
+
+    session.commit(createIntentSender(context, sessionId));
+
+    Log.d(TAG, "installPackage: end");
+
+    return true;
+  }
+
+  private static IntentSender createIntentSender(Context context, int sessionId) {
+    PendingIntent pendingIntent = PendingIntent.getBroadcast(
+        context,
+        sessionId,
+        new Intent(ACTION_INSTALL_COMPLETE),
+        0);
+
+    return pendingIntent.getIntentSender();
+  }
+
 
   public boolean isStoragePermissionGranted() {
     if (Build.VERSION.SDK_INT >= 23) {
