@@ -1,10 +1,13 @@
 package com.example.jonathanzhong.packagedownloadinstall;
 
 import android.Manifest;
+import android.app.Activity;
 import android.app.DownloadManager;
 import android.app.PendingIntent;
 import android.app.ProgressDialog;
+import android.content.ActivityNotFoundException;
 import android.content.BroadcastReceiver;
+import android.content.ContentResolver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
@@ -20,16 +23,16 @@ import android.os.Environment;
 import android.support.design.widget.FloatingActionButton;
 import android.support.design.widget.Snackbar;
 import android.support.v4.app.ActivityCompat;
+import android.support.v4.content.FileProvider;
 import android.support.v7.app.AppCompatActivity;
 import android.support.v7.widget.Toolbar;
 import android.util.Log;
-import android.view.View;
 import android.view.Menu;
 import android.view.MenuItem;
+import android.view.View;
+import android.webkit.MimeTypeMap;
 
 import java.io.File;
-import java.io.FileInputStream;
-import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -40,18 +43,21 @@ import java.net.URL;
 public class MainActivity extends AppCompatActivity {
   private static final String TAG = MainActivity.class.getSimpleName();
 
-  private static final String APK_DOWNLOAD_URL =
-      "https://github.com/jonathanzho/resFiles/raw/master/apk/PayJoyPackageMonitor.apk";
-  private static final String APK_FILE_NAME = "PayJoyPackageMonitor.apk";
   private static final String APK_PACKAGE_NAME = "com.example.jonathan.payjoypackagemonitor";
+  private static final String APK_FILE_NAME = "PayJoyPackageMonitor.apk";
+
+  private static final String APK_DOWNLOAD_URL = "https://github.com/jonathanzho/resFiles/raw/master/apk/" + APK_FILE_NAME;
+
   private static final String ACTION_INSTALL_COMPLETE = "com.example.jonathanzhong.packagedownloadinstall.INSTALL_COMPLETE";
 
   ProgressDialog pd;
 
   private long m_downloadId = 0;
   private DownloadManager m_downloadManager;
+  private File m_downloadDir;
   private String m_downloadedApkFilePath;
   private Uri m_downloadedApkUri;
+  private BroadcastReceiver m_downloadCompleteReceiver;
 
   @Override
   protected void onCreate(Bundle savedInstanceState) {
@@ -76,87 +82,24 @@ public class MainActivity extends AppCompatActivity {
     // Get runtime storage permission for API 23 and up:
     //isStoragePermissionGranted();
 
-    m_downloadedApkFilePath = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS) + "/" + APK_FILE_NAME;
+    m_downloadDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
+    m_downloadedApkFilePath = m_downloadDir + "/" + APK_FILE_NAME;    // ???
     m_downloadedApkUri = Uri.parse("file://" + m_downloadedApkFilePath);
+    m_downloadManager = (DownloadManager) getSystemService(Context.DOWNLOAD_SERVICE);
 
-    BroadcastReceiver receiver = new BroadcastReceiver() {
+    m_downloadCompleteReceiver = new BroadcastReceiver() {
       @Override
       public void onReceive(Context context, Intent intent) {
         String action = intent.getAction();
 
         if (DownloadManager.ACTION_DOWNLOAD_COMPLETE.equals(action)) {
           long downloadId = intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, 0);
-          DownloadManager.Query query = new DownloadManager.Query();
-          query.setFilterById(MainActivity.this.m_downloadId);
-          Cursor c = m_downloadManager.query(query);
-
-          if (c.moveToFirst()) {
-            int columnIndex = c.getColumnIndex(DownloadManager.COLUMN_STATUS);
-
-            if (DownloadManager.STATUS_SUCCESSFUL == c.getInt(columnIndex)) {
-              Log.v(TAG, "download SUCCESSFUL");
-
-              Log.v(TAG, "displaying APK...");
-
-              Intent displayIntent = new Intent();
-              displayIntent.setAction(DownloadManager.ACTION_VIEW_DOWNLOADS);
-              startActivity(displayIntent);
-
-              try {
-                Thread.sleep(5000);
-              } catch (InterruptedException e) {
-                e.printStackTrace();
-              }
-
-              File downloadedApkFile = new File(m_downloadedApkFilePath);
-              downloadedApkFile.setReadable(true, false);
-
-              Log.v(TAG, "installing [" + m_downloadedApkFilePath + "]...");
-
-              InputStream downloadedApkInputStream = null;
-              try {
-                downloadedApkInputStream = new FileInputStream(downloadedApkFile);
-              } catch (IOException e) {
-                e.printStackTrace();
-              }
-
-              try {
-                installPackage(getApplicationContext(), downloadedApkInputStream, APK_PACKAGE_NAME);
-              } catch (IOException e) {
-                e.printStackTrace();
-              }
-
-              unregisterReceiver(this);
-              finish();
-            } else {
-              Log.e(TAG, "download UNSUCCESSFUL");
-            }
-          }
+          openDownloadedAttachement(getApplicationContext(), downloadId);
         }
       }
     };
 
-    registerReceiver(receiver, new IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE));
-
-    try {
-      Thread.sleep(5000);
-    } catch (InterruptedException e) {
-      e.printStackTrace();
-    }
-
-    // Clean-up before download
-    File file = new File(m_downloadedApkFilePath);
-    if (file.exists()) {
-      Log.v(TAG,"onCreate: deleting old APK from the download folder...");
-      file.delete();  // Does not work ???
-    } else {
-      Log.v(TAG,"onCreate: no old APK found");
-    }
-
-    // Request download
-    m_downloadManager = (DownloadManager) getSystemService(DOWNLOAD_SERVICE);
-    DownloadManager.Request request = new DownloadManager.Request(Uri.parse(APK_DOWNLOAD_URL));
-    m_downloadId = m_downloadManager.enqueue(request);
+    isStoragePermissionGranted();
 
     Log.d(TAG, "onCreate: end");
   }
@@ -185,6 +128,150 @@ public class MainActivity extends AppCompatActivity {
 
   // New methods
   // ===========
+
+  public void downloadFile(final Activity activity, final BroadcastReceiver receiver, final String url, final String fileName) {
+    Log.d(TAG, "downloadFile");
+
+    try {
+      if (url != null && !url.isEmpty()) {
+        Uri uri = Uri.parse(url);
+        activity.registerReceiver(receiver, new IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE));
+        DownloadManager.Request request = new DownloadManager.Request(uri);
+        request.setMimeType(getMimeType(uri.toString()));
+        request.setTitle(fileName);
+        request.setDescription("Downloading attachment...");
+        request.allowScanningByMediaScanner();;
+        request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
+        request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName);
+        m_downloadManager.enqueue(request);
+      }
+    } catch (IllegalStateException e) {
+      e.printStackTrace();
+    }
+  }
+
+  private String getMimeType(String url) {
+    Log.d(TAG, "getMimeType");
+
+    String type = null;
+    String extension = MimeTypeMap.getFileExtensionFromUrl(url);
+
+    if (extension != null) {
+      MimeTypeMap mime = MimeTypeMap.getSingleton();
+      type = mime.getMimeTypeFromExtension(extension);
+    }
+
+    return type;
+  }
+
+private void openDownloadedAttachement(final Context context, final long downloadId) {
+  Log.d(TAG, "openDownloadedAttachment");
+
+  DownloadManager.Query query = new DownloadManager.Query();
+  query.setFilterById(downloadId);
+  Cursor cursor = m_downloadManager.query(query);
+
+  if (cursor.moveToFirst()) {
+    int downloadStatus = cursor.getInt(cursor.getColumnIndex(DownloadManager.COLUMN_STATUS));
+    String downloadLocalUri = cursor.getString(cursor.getColumnIndex(DownloadManager.COLUMN_LOCAL_URI));
+    String downloadMimeType = cursor.getString(cursor.getColumnIndex(DownloadManager.COLUMN_MEDIA_TYPE));
+
+    if (downloadStatus == DownloadManager.STATUS_SUCCESSFUL && downloadLocalUri != null) {
+      openDownloadedAttachment2(context, Uri.parse(downloadLocalUri), downloadMimeType);
+    }
+  }
+
+  cursor.close();
+}
+
+private void openDownloadedAttachment2(final Context context, Uri attachmentUri, final String attachmentMimeType) {
+  Log.d(TAG, "openDownloadedAttachment2");
+
+  if (attachmentUri != null) {
+    if (ContentResolver.SCHEME_FILE.equals(attachmentUri.getScheme())) {
+      File file = new File(attachmentUri.getPath());
+      attachmentUri = FileProvider.getUriForFile(context, "com.example.jonathanzhong.packagedownloadinstall", file);
+    }
+
+    Intent openAttachmentIntent = new Intent(Intent.ACTION_VIEW);
+    openAttachmentIntent.setDataAndType(attachmentUri, attachmentMimeType);
+    openAttachmentIntent.setFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+
+    try {
+      context.startActivity(openAttachmentIntent);
+    } catch (ActivityNotFoundException e) {
+      e.printStackTrace();
+    }
+  }
+}
+
+/*
+
+  DownloadManager.Query query = new DownloadManager.Query();
+          query.setFilterById(MainActivity.this.m_downloadId);
+  Cursor c = m_downloadManager.query(query);
+
+          if (c.moveToFirst()) {
+    int columnIndex = c.getColumnIndex(DownloadManager.COLUMN_STATUS);
+
+    if (DownloadManager.STATUS_SUCCESSFUL == c.getInt(columnIndex)) {
+      Log.v(TAG, "download SUCCESSFUL");
+
+      Log.v(TAG, "displaying APK...");
+
+      String[] fileList = m_downloadDir.list();
+      if (fileList == null) {
+        Log.e(TAG, "empty download dir !!!");
+      } else {
+        Log.v(TAG, "file list: " + String.join(",", fileList));
+      }
+
+      Intent displayIntent = new Intent();
+      displayIntent.setAction(DownloadManager.ACTION_VIEW_DOWNLOADS);
+      startActivity(displayIntent);
+
+      try {
+        Thread.sleep(5000);
+      } catch (InterruptedException e) {
+        e.printStackTrace();
+      }
+
+      int uriIndex = c.getColumnIndex(DownloadManager.COLUMN_LOCAL_URI);
+      String uriString = c.getString(uriIndex);
+
+      Log.v(TAG, "uriString = [" + uriString + "]");
+
+      File downloadedApkFile = new File(uriString);
+      downloadedApkFile.setReadable(true, false);
+
+      Log.v(TAG, "installing [" + uriString + "]...");
+
+
+
+      InputStream downloadedApkInputStream = null;
+      try {
+        downloadedApkInputStream = new FileInputStream(downloadedApkFile);
+      } catch (IOException e) {
+        e.printStackTrace();
+      }
+
+      try {
+        installPackage(getApplicationContext(), downloadedApkInputStream, APK_PACKAGE_NAME);
+      } catch (IOException e) {
+        e.printStackTrace();
+      }
+
+      unregisterReceiver(this);
+      finish();
+    } else {
+      Log.e(TAG, "download UNSUCCESSFUL");
+    }
+  }
+}
+      }
+          };
+
+*/
 
   public static boolean installPackage(Context context, InputStream inputStream, String packageName) throws IOException {
     Log.d(TAG, "installPackage: start");
@@ -228,14 +315,22 @@ public class MainActivity extends AppCompatActivity {
       if (checkSelfPermission(android.Manifest.permission.WRITE_EXTERNAL_STORAGE)
           == PackageManager.PERMISSION_GRANTED) {
         Log.v(TAG, "isStoragePermissionGranted: API 23 and up: YES");
+
+        downloadFile(this, m_downloadCompleteReceiver, APK_DOWNLOAD_URL, APK_FILE_NAME);
+
         return true;
       } else {
         Log.v(TAG, "isStoragePermissionGranted: API 23 and up: NO. requesting...");
+
         ActivityCompat.requestPermissions(this, new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE}, 1);
+
         return false;
       }
     } else {
       Log.v(TAG, "isStoragePermissionGranted: API 22 and down: YES");
+
+      downloadFile(this, m_downloadCompleteReceiver, APK_DOWNLOAD_URL, APK_FILE_NAME);
+
       return true;
     }
   }
@@ -248,8 +343,10 @@ public class MainActivity extends AppCompatActivity {
       Log.v(TAG, "onRequestPermissionsResult: Storage permission GRANTED");
 
       // Start downloading and installing:
-      DownloadInstallPackageTask dipTask = new DownloadInstallPackageTask();
-      dipTask.execute(APK_DOWNLOAD_URL);
+      //DownloadInstallPackageTask dipTask = new DownloadInstallPackageTask();
+      //dipTask.execute(APK_DOWNLOAD_URL);
+
+      downloadFile(this, m_downloadCompleteReceiver, APK_DOWNLOAD_URL, APK_FILE_NAME);
     } else {
       Log.v(TAG, "onRequestPermissionsResult: Storage permission DENIED");
     }
