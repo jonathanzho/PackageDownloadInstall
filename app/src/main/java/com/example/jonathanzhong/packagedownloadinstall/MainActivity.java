@@ -164,114 +164,46 @@ public class MainActivity extends AppCompatActivity {
     return type;
   }
 
-private void openDownloadedAttachement(final Context context, final long downloadId) {
-  Log.d(TAG, "openDownloadedAttachment");
+  private void openDownloadedAttachement(final Context context, final long downloadId) {
+    Log.d(TAG, "openDownloadedAttachment");
 
-  DownloadManager.Query query = new DownloadManager.Query();
-  query.setFilterById(downloadId);
-  Cursor cursor = m_downloadManager.query(query);
+    DownloadManager.Query query = new DownloadManager.Query();
+    query.setFilterById(downloadId);
+    Cursor cursor = m_downloadManager.query(query);
 
-  if (cursor.moveToFirst()) {
-    int downloadStatus = cursor.getInt(cursor.getColumnIndex(DownloadManager.COLUMN_STATUS));
-    String downloadLocalUri = cursor.getString(cursor.getColumnIndex(DownloadManager.COLUMN_LOCAL_URI));
-    String downloadMimeType = cursor.getString(cursor.getColumnIndex(DownloadManager.COLUMN_MEDIA_TYPE));
+    if (cursor.moveToFirst()) {
+      int downloadStatus = cursor.getInt(cursor.getColumnIndex(DownloadManager.COLUMN_STATUS));
+      String downloadLocalUri = cursor.getString(cursor.getColumnIndex(DownloadManager.COLUMN_LOCAL_URI));
+      String downloadMimeType = cursor.getString(cursor.getColumnIndex(DownloadManager.COLUMN_MEDIA_TYPE));
 
-    if (downloadStatus == DownloadManager.STATUS_SUCCESSFUL && downloadLocalUri != null) {
-      openDownloadedAttachment2(context, Uri.parse(downloadLocalUri), downloadMimeType);
+      if (downloadStatus == DownloadManager.STATUS_SUCCESSFUL && downloadLocalUri != null) {
+        openDownloadedAttachment2(context, Uri.parse(downloadLocalUri), downloadMimeType);
+      }
     }
+
+    cursor.close();
   }
 
-  cursor.close();
-}
+  private void openDownloadedAttachment2(final Context context, Uri attachmentUri, final String attachmentMimeType) {
+    Log.d(TAG, "openDownloadedAttachment2");
 
-private void openDownloadedAttachment2(final Context context, Uri attachmentUri, final String attachmentMimeType) {
-  Log.d(TAG, "openDownloadedAttachment2");
+    if (attachmentUri != null) {
+      if (ContentResolver.SCHEME_FILE.equals(attachmentUri.getScheme())) {
+        File file = new File(attachmentUri.getPath());
+        attachmentUri = FileProvider.getUriForFile(context, getApplicationContext().getPackageName(), file);
+      }
 
-  if (attachmentUri != null) {
-    if (ContentResolver.SCHEME_FILE.equals(attachmentUri.getScheme())) {
-      File file = new File(attachmentUri.getPath());
-      attachmentUri = FileProvider.getUriForFile(context, "com.example.jonathanzhong.packagedownloadinstall", file);
-    }
+      Intent openAttachmentIntent = new Intent(Intent.ACTION_VIEW);
+      openAttachmentIntent.setDataAndType(attachmentUri, attachmentMimeType);
+      openAttachmentIntent.setFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
 
-    Intent openAttachmentIntent = new Intent(Intent.ACTION_VIEW);
-    openAttachmentIntent.setDataAndType(attachmentUri, attachmentMimeType);
-    openAttachmentIntent.setFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
-
-    try {
-      context.startActivity(openAttachmentIntent);
-    } catch (ActivityNotFoundException e) {
-      e.printStackTrace();
+      try {
+        context.startActivity(openAttachmentIntent);
+      } catch (ActivityNotFoundException e) {
+        e.printStackTrace();
+      }
     }
   }
-}
-
-/*
-
-  DownloadManager.Query query = new DownloadManager.Query();
-          query.setFilterById(MainActivity.this.m_downloadId);
-  Cursor c = m_downloadManager.query(query);
-
-          if (c.moveToFirst()) {
-    int columnIndex = c.getColumnIndex(DownloadManager.COLUMN_STATUS);
-
-    if (DownloadManager.STATUS_SUCCESSFUL == c.getInt(columnIndex)) {
-      Log.v(TAG, "download SUCCESSFUL");
-
-      Log.v(TAG, "displaying APK...");
-
-      String[] fileList = m_downloadDir.list();
-      if (fileList == null) {
-        Log.e(TAG, "empty download dir !!!");
-      } else {
-        Log.v(TAG, "file list: " + String.join(",", fileList));
-      }
-
-      Intent displayIntent = new Intent();
-      displayIntent.setAction(DownloadManager.ACTION_VIEW_DOWNLOADS);
-      startActivity(displayIntent);
-
-      try {
-        Thread.sleep(5000);
-      } catch (InterruptedException e) {
-        e.printStackTrace();
-      }
-
-      int uriIndex = c.getColumnIndex(DownloadManager.COLUMN_LOCAL_URI);
-      String uriString = c.getString(uriIndex);
-
-      Log.v(TAG, "uriString = [" + uriString + "]");
-
-      File downloadedApkFile = new File(uriString);
-      downloadedApkFile.setReadable(true, false);
-
-      Log.v(TAG, "installing [" + uriString + "]...");
-
-
-
-      InputStream downloadedApkInputStream = null;
-      try {
-        downloadedApkInputStream = new FileInputStream(downloadedApkFile);
-      } catch (IOException e) {
-        e.printStackTrace();
-      }
-
-      try {
-        installPackage(getApplicationContext(), downloadedApkInputStream, APK_PACKAGE_NAME);
-      } catch (IOException e) {
-        e.printStackTrace();
-      }
-
-      unregisterReceiver(this);
-      finish();
-    } else {
-      Log.e(TAG, "download UNSUCCESSFUL");
-    }
-  }
-}
-      }
-          };
-
-*/
 
   public static boolean installPackage(Context context, InputStream inputStream, String packageName) throws IOException {
     Log.d(TAG, "installPackage: start");
