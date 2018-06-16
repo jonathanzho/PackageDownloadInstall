@@ -39,8 +39,6 @@ public class MainActivity extends AppCompatActivity {
 
   private DownloadManager m_downloadManager;
   private BroadcastReceiver m_downloadCompleteReceiver;
-  private boolean m_apkInstalled;
-  private boolean m_apkDownloaded;
 
   @Override
   protected void onCreate(Bundle savedInstanceState) {
@@ -75,9 +73,6 @@ public class MainActivity extends AppCompatActivity {
         }
       }
     };
-
-    m_apkInstalled = isPackageInstalled(APK_PACKAGE_NAME);
-    m_apkDownloaded = false;
 
     boolean storageGranted = checkStoragePermissionBeforeDownloading();
 
@@ -114,9 +109,19 @@ public class MainActivity extends AppCompatActivity {
   public void downloadFile(final Context context, final BroadcastReceiver receiver, final String url, final String fileName) {
     Log.d(TAG, "downloadFile");
 
-    if (m_apkInstalled) {
+    boolean apkInstalled =  isPackageInstalled(APK_PACKAGE_NAME);
+    if (apkInstalled) {
       Log.i(TAG, "downloadFile: APK=[" + APK_PACKAGE_NAME + "] is already installed. No downloading.");
       return;
+    }
+
+    String apkFilePath = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) + "/" + fileName;
+    File apkFile = new File(apkFilePath);
+    if (apkFile.exists()) {    // ??? This always returns false even though the file exists.
+      Log.i(TAG, "downloadFile: apkFilePath=[" + apkFilePath + "] already exists. No downloading.");
+      return;
+    } else {
+      Log.i(TAG, "downloadFile: apkFilePath=[" + apkFilePath + "] does not exist. Start downloading ...");
     }
 
     try {
