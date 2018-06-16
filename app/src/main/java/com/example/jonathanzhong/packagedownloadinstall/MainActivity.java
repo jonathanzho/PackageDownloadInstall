@@ -112,18 +112,23 @@ public class MainActivity extends AppCompatActivity {
 
     boolean apkInstalled =  isPackageInstalled(APK_PACKAGE_NAME);
     if (apkInstalled) {
-      Log.i(TAG, "downloadFile: APK=[" + APK_PACKAGE_NAME + "] is already installed. No downloading.");
+      Log.w(TAG, "downloadFile: APK=[" + APK_PACKAGE_NAME + "] is already installed. No downloading.");
       return;
     }
 
-    // This should match the one in DownloadManager.Request:
+    // This should match the one in DownloadManager.Request.setDestinationUri().
+    // It seems that DownloadManager cannot put file into other app's internal storage.
+    // And the system Download directory is not easily accessible.
+    // So let's try a public storage directory.
+    // However, the file can easily be deleted.
     String apkFilePath = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS) + "/" + fileName;
+
     File apkFile = new File(apkFilePath);
     if (apkFile.exists()) {
-      Log.i(TAG, "downloadFile: apkFilePath=[" + apkFilePath + "] already exists. No downloading.");
+      Log.w(TAG, "downloadFile: apkFilePath=[" + apkFilePath + "] already exists. No downloading.");
       return;
     } else {
-      Log.i(TAG, "downloadFile: apkFilePath=[" + apkFilePath + "] does not exist. Start downloading ...");
+      Log.v(TAG, "downloadFile: apkFilePath=[" + apkFilePath + "] does not exist. Start downloading ...");
     }
 
     try {
@@ -133,11 +138,10 @@ public class MainActivity extends AppCompatActivity {
         DownloadManager.Request request = new DownloadManager.Request(uri);
         request.setMimeType(getMimeType(uri.toString()));
         request.setTitle(fileName);
-        request.setDescription("Downloading attachment...");
-        request.allowScanningByMediaScanner();
+        request.setDescription("Downloading APK as an attachment...");
         request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
         // The destination may need change:
-        request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName);
+        request.setDestinationUri(Uri.fromFile(apkFile));
         m_downloadManager.enqueue(request);
       }
     } catch (IllegalStateException e) {
