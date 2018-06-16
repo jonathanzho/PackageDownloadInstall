@@ -8,7 +8,7 @@ import android.content.ContentResolver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
-import android.content.pm.PackageInfo;
+import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.database.Cursor;
 import android.net.Uri;
@@ -29,6 +29,7 @@ import android.view.View;
 import android.webkit.MimeTypeMap;
 
 import java.io.File;
+import java.util.List;
 
 public class MainActivity extends AppCompatActivity {
   private static final String TAG = MainActivity.class.getSimpleName();
@@ -115,9 +116,10 @@ public class MainActivity extends AppCompatActivity {
       return;
     }
 
-    String apkFilePath = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) + "/" + fileName;
+    // This should match the one in DownloadManager.Request:
+    String apkFilePath = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS) + "/" + fileName;
     File apkFile = new File(apkFilePath);
-    if (apkFile.exists()) {    // ??? This always returns false even though the file exists.
+    if (apkFile.exists()) {
       Log.i(TAG, "downloadFile: apkFilePath=[" + apkFilePath + "] already exists. No downloading.");
       return;
     } else {
@@ -134,6 +136,7 @@ public class MainActivity extends AppCompatActivity {
         request.setDescription("Downloading attachment...");
         request.allowScanningByMediaScanner();
         request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
+        // The destination may need change:
         request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName);
         m_downloadManager.enqueue(request);
       }
@@ -144,13 +147,15 @@ public class MainActivity extends AppCompatActivity {
 
   public boolean isPackageInstalled(String targetPackage) {
     PackageManager pm = getPackageManager();
-    try {
-      PackageInfo info = pm.getPackageInfo(targetPackage, PackageManager.GET_META_DATA);
-    } catch (PackageManager.NameNotFoundException e) {
-      e.printStackTrace();
-      return false;
+    List<ApplicationInfo> packages = pm.getInstalledApplications(0);
+
+    for (ApplicationInfo packageInfo : packages) {
+      if (packageInfo.packageName.equals(targetPackage)) {
+        return true;
+      }
     }
-    return true;
+
+    return false;
   }
 
   private String getMimeType(String url) {
