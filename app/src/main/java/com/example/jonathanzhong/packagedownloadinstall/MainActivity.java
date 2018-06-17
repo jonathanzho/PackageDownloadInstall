@@ -2,13 +2,14 @@ package com.example.jonathanzhong.packagedownloadinstall;
 
 import android.Manifest;
 import android.app.DownloadManager;
-import android.content.ActivityNotFoundException;
+import android.app.PendingIntent;
 import android.content.BroadcastReceiver;
 import android.content.ContentResolver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.pm.ApplicationInfo;
+import android.content.pm.PackageInstaller;
 import android.content.pm.PackageManager;
 import android.database.Cursor;
 import android.net.Uri;
@@ -19,7 +20,6 @@ import android.support.annotation.NonNull;
 import android.support.design.widget.FloatingActionButton;
 import android.support.design.widget.Snackbar;
 import android.support.v4.app.ActivityCompat;
-import android.support.v4.content.FileProvider;
 import android.support.v7.app.AppCompatActivity;
 import android.support.v7.widget.Toolbar;
 import android.util.Log;
@@ -29,6 +29,10 @@ import android.view.View;
 import android.webkit.MimeTypeMap;
 
 import java.io.File;
+import java.io.FileInputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.util.List;
 
 public class MainActivity extends AppCompatActivity {
@@ -110,7 +114,7 @@ public class MainActivity extends AppCompatActivity {
   public void downloadFile(final Context context, final BroadcastReceiver receiver, final String url, final String fileName) {
     Log.d(TAG, "downloadFile");
 
-    boolean apkInstalled =  isPackageInstalled(APK_PACKAGE_NAME);
+    boolean apkInstalled = isPackageInstalled(APK_PACKAGE_NAME);
     if (apkInstalled) {
       Log.w(TAG, "downloadFile: APK=[" + APK_PACKAGE_NAME + "] is already installed. No downloading.");
       return;
@@ -147,9 +151,13 @@ public class MainActivity extends AppCompatActivity {
     } catch (IllegalStateException e) {
       e.printStackTrace();
     }
+
+    Log.v(TAG, "downloadFile: end");
   }
 
   public boolean isPackageInstalled(String targetPackage) {
+    Log.d(TAG, "isPackageInstalled");
+
     PackageManager pm = getPackageManager();
     List<ApplicationInfo> packages = pm.getInstalledApplications(0);
 
@@ -194,6 +202,8 @@ public class MainActivity extends AppCompatActivity {
     }
 
     cursor.close();
+
+    Log.v(TAG, "openDownloadedAttachment: end");
   }
 
   private void openDownloadedAttachment2(final Context context, Uri attachmentUri, final String attachmentMimeType) {
@@ -202,22 +212,36 @@ public class MainActivity extends AppCompatActivity {
     if (attachmentUri != null) {
       if (ContentResolver.SCHEME_FILE.equals(attachmentUri.getScheme())) {
         File file = new File(attachmentUri.getPath());
-        attachmentUri = FileProvider.getUriForFile(context, getApplicationContext().getPackageName(), file);
+        //attachmentUri = FileProvider.getUriForFile(context, getApplicationContext().getPackageName(), file);
+        try {
+          InputStream inputStream = new FileInputStream(file);
+          installPackage(context, inputStream);
+        } catch (IOException e) {
+          e.printStackTrace();
+        }
+      } else {
+        Log.e(TAG, "openDownloadAttachment2: not a file scheme !!!");
       }
 
-      Intent openAttachmentIntent = new Intent(Intent.ACTION_VIEW);
-      openAttachmentIntent.setDataAndType(attachmentUri, attachmentMimeType);
-      openAttachmentIntent.setFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+      //Intent openAttachmentIntent = new Intent(Intent.ACTION_VIEW);
+      //openAttachmentIntent.setDataAndType(attachmentUri, attachmentMimeType);
+      //openAttachmentIntent.setFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
 
-      try {
-        context.startActivity(openAttachmentIntent);
-      } catch (ActivityNotFoundException e) {
-        e.printStackTrace();
-      }
+      //try {
+      //  context.startActivity(openAttachmentIntent);
+      //} catch (ActivityNotFoundException e) {
+      //  e.printStackTrace();
+      //}
+    } else {
+      Log.e(TAG, "OpenDownloadAttachment2: attachmentUri == null !!!");
     }
+
+    Log.v(TAG, "openDownloadedAttachment2: end");
   }
 
   public boolean checkStoragePermissionBeforeDownloading() {
+    Log.d(TAG, "checkStoragePermissionBeforeDownloading");
+
     if (Build.VERSION.SDK_INT >= 23) {
       if (checkSelfPermission(android.Manifest.permission.WRITE_EXTERNAL_STORAGE)
           == PackageManager.PERMISSION_GRANTED) {
@@ -244,6 +268,8 @@ public class MainActivity extends AppCompatActivity {
 
   @Override
   public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int grantResults[]) {
+    Log.d(TAG, "onRequestPermissionsResult");
+
     super.onRequestPermissionsResult(requestCode, permissions, grantResults);
 
     if (grantResults[0] == PackageManager.PERMISSION_GRANTED) {
@@ -253,5 +279,67 @@ public class MainActivity extends AppCompatActivity {
     } else {
       Log.v(TAG, "onRequestPermissionsResult: Storage permission DENIED");
     }
+  }
+
+  /*
+    public static DevicePolicyManager getDpm(Context context) {
+      return (DevicePolicyManager)context.getSystemService(Context.DEVICE_POLICY_SERVICE);
+    }
+
+    public static ComponentName getAdmin(Context context) {
+      return new ComponentName(context, MyDevicePolicyReceiver.class);
+    }
+
+    public static void addMyRestrictions(Context context) {
+      getDpm(context).addUserRestriction(getAdmin(context), UserManager.DISALLOW_INSTALL_APPS);
+      getDpm(context).addUserRestriction(getAdmin(context), UserManager.DISALLOW_INSTALL_UNKNOWN_SOURCES);
+    }
+
+    public static void clearMyRestrictions(Context context) {
+      getDpm(context).clearUserRestriction(getAdmin(context), UserManager.DISALLOW_INSTALL_APPS);
+      getDpm(context).clearUserRestriction(getAdmin(context), UserManager.DISALLOW_INSTALL_UNKNOWN_SOURCES);
+    }
+  */
+
+  public static void installPackage(Context context, InputStream inputStream) throws IOException {
+    Log.d(TAG, "installPackage");
+
+    PackageInstaller packageInstaller = context.getPackageManager().getPackageInstaller();
+    int sessionId = packageInstaller.createSession(new PackageInstaller
+        .SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL));
+
+    //openSession checks for user restrictions
+    //clearMyRestrictions(context);
+    PackageInstaller.Session session = packageInstaller.openSession(sessionId);
+    //addMyRestrictions(context);
+
+    long sizeBytes = 0;
+
+    OutputStream out;
+    out = session.openWrite("my_app_session", 0, sizeBytes);
+
+    int total = 0;
+    byte[] buffer = new byte[65536];
+    int c;
+    while ((c = inputStream.read(buffer)) != -1) {
+      total += c;
+      out.write(buffer, 0, c);
+    }
+    session.fsync(out);
+    inputStream.close();
+    out.close();
+
+    Log.v(TAG, "installPackage: total=[" + total + "]");
+
+    // fake intent
+    //IntentSender statusReceiver = null;
+    Intent intent = new Intent(context, MainActivity.class);
+    PendingIntent pendingIntent = PendingIntent.getBroadcast(context,
+        1337111117, intent, PendingIntent.FLAG_UPDATE_CURRENT);
+
+    session.commit(pendingIntent.getIntentSender());
+    session.close();
+
+    Log.v(TAG, "installPackage: end");
   }
 }
